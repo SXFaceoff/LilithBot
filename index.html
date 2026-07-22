@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>Книга</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  :root {
+    --ink: #2b2622;
+    --paper: #f2e9d8;
+    --paper-edge: #e4d7bf;
+    --paper-line: #d9c9ab;
+    --min-bg: #16181c;
+    --min-panel: #1e2128;
+    --min-text: #e6e8ec;
+    --min-muted: #8b909a;
+    --min-accent: #c9a35e;
+    --min-border: #2c3038;
+  }
+  html, body {
+    height: 100%; width: 100%; overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--min-bg);
+    color: var(--min-text);
+    overscroll-behavior: none;
+  }
+  #app { height: 100vh; width: 100vw; display: flex; flex-direction: column; position: relative; }
+
+  /* ============ БИБЛИОТЕКА ============ */
+  #library { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--min-bg); z-index: 30; }
+  #library.hidden { display: none; }
+  .lib-head {
+    padding: 22px 20px 14px; border-bottom: 1px solid var(--min-border);
+    display: flex; align-items: baseline; justify-content: space-between;
+  }
+  .lib-head h1 { font-size: 24px; font-weight: 600; letter-spacing: -0.4px; }
+  .lib-head span { font-size: 12px; color: var(--min-muted); }
+  .lib-list { flex: 1; overflow-y: auto; padding: 12px 16px 90px; }
+  .book-card {
+    background: var(--min-panel); border: 1px solid var(--min-border); border-radius: 12px;
+    padding: 16px 16px; margin-bottom: 10px; display: flex; align-items: center; gap: 14px;
+    cursor: pointer; transition: border-color .15s, transform .05s;
+  }
+  .book-card:active { transform: scale(0.99); }
+  .book-spine {
+    width: 42px; height: 54px; border-radius: 3px 5px 5px 3px; flex-shrink: 0;
+    background: linear-gradient(105deg, #b07b3e, #8a5a28);
+    box-shadow: inset -3px 0 6px rgba(0,0,0,.3), inset 3px 0 0 rgba(255,255,255,.12);
+    position: relative;
+  }
+  .book-spine::after { content:""; position:absolute; left:6px; top:0; bottom:0; width:1.5px; background: rgba(0,0,0,.25); }
+  .book-info { flex: 1; min-width: 0; }
+  .book-info h3 { font-size: 16px; font-weight: 600; margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .book-info p { font-size: 12px; color: var(--min-muted); }
+  .book-del {
+    color: var(--min-muted); font-size: 20px; padding: 6px 8px; border-radius: 8px; flex-shrink: 0;
+  }
+  .book-del:active { background: rgba(255,80,80,.15); color: #ff6b6b; }
+  .lib-empty { text-align: center; color: var(--min-muted); margin-top: 60px; font-size: 14px; line-height: 1.6; padding: 0 30px; }
+  .fab {
+    position: absolute; bottom: 24px; right: 20px; width: 56px; height: 56px; border-radius: 50%;
+    background: var(--min-accent); color: #1a1a1a; border: none; font-size: 30px; font-weight: 300;
+    box-shadow: 0 6px 18px rgba(201,163,94,.35); z-index: 40; display: flex; align-items: center; justify-content: center;
+  }
+  .fab:active { transform: scale(0.94); }
+
+  /* ============ РЕДАКТОР ============ */
+  #editor { position: absolute; inset: 0; display: none; flex-direction: column; }
+  #editor.active { display: flex; }
+
+  .top-bar {
+    display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+    background: var(--min-panel); border-bottom: 1px solid var(--min-border); z-index: 10;
+  }
+  .icon-btn {
+    background: none; border: none; color: var(--min-text); font-size: 18px; padding: 8px 10px;
+    border-radius: 8px; display: flex; align-items: center; justify-content: center;
+  }
+  .icon-btn:active { background: rgba(255,255,255,.08); }
+  .book-title-top { flex: 1; font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .tabs { display: flex; background: var(--min-panel); border-bottom: 1px solid var(--min-border); }
+  .tab {
+    flex: 1; padding: 11px 4px; text-align: center; font-size: 13px; color: var(--min-muted);
+    border: none; background: none; border-bottom: 2px solid transparent; font-weight: 500;
+  }
+  .tab.active { color: var(--min-accent); border-bottom-color: var(--min-accent); }
+
+  .panel { flex: 1; position: relative; overflow: hidden; }
+  .panel.hidden { display: none; }
+  #panel-write { display: flex; flex-direction: column; }
+  #panel-write.hidden { display: none; }
+
+  /* --- Формат-панель --- */
+  .format-bar {
+    display: flex; gap: 4px; padding: 6px 8px; background: var(--min-panel);
+    border-bottom: 1px solid var(--min-border); overflow-x: auto; align-items: center;
+  }
+  .fmt {
+    background: var(--min-bg); border: 1px solid var(--min-border); color: var(--min-text);
+    min-width: 34px; height: 32px; border-radius: 7px; font-size: 14px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center; padding: 0 8px;
+  }
+  .fmt.on { background: var(--min-accent); color: #1a1a1a; border-color: var(--min-accent); }
+  .fmt b { font-weight: 800; }
+  .fmt i { font-style: italic; }
+  .fmt u { text-decoration: underline; }
+  .fmt input[type=color] { width: 20px; height: 20px; border: none; background: none; padding: 0; border-radius: 4px; }
+  .fmt select { background: var(--min-bg); color: var(--min-text); border: none; font-size: 13px; outline: none; }
+
+  /* --- Написание --- */
+  #write-wrap { flex: 1; position: relative; display: flex; min-height: 0; }
+  .swipe-zone { width: 44px; flex-shrink: 0; background: linear-gradient(var(--min-panel), var(--min-bg)); position: relative; }
+  .swipe-zone::after {
+    content: ""; position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    width: 4px; height: 40px; border-radius: 2px; background: var(--min-border);
+  }
+  .swipe-hint { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); font-size: 9px; color: var(--min-muted); writing-mode: vertical-rl; letter-spacing: 1px; }
+  #write-area {
+    flex: 1; padding: 18px 14px; font-size: 17px; line-height: 1.7; color: var(--min-text);
+    overflow-y: auto; outline: none; -webkit-user-select: text; user-select: text;
+  }
+  #write-area:empty::before { content: "Начните писать здесь…"; color: var(--min-muted); }
+  .page-counter {
+    position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
+    font-size: 11px; color: var(--min-muted); background: var(--min-panel);
+    padding: 3px 12px; border-radius: 10px; border: 1px solid var(--min-border); pointer-events: none;
+  }
+
+  /* --- Чтение (классика) --- */
+  #read-wrap { position: absolute; inset: 0; background: #3a2f22; overflow: hidden; touch-action: pan-y; }
+  .r-page {
+    position: absolute; inset: 0;
+    background: var(--paper);
+    background-image:
+      radial-gradient(ellipse at 8% 50%, rgba(120,90,50,.10), transparent 22%),
+      repeating-linear-gradient(transparent, transparent 33px, rgba(150,120,80,.05) 34px);
+    color: var(--ink);
+    padding: 34px 28px calc(58px + env(safe-area-inset-bottom, 0px));
+    font-family: Georgia, "Times New Roman", serif; font-size: 18px; line-height: 1.85;
+    overflow: hidden; will-change: transform;
+    box-shadow:
+      inset 0 0 70px rgba(120,90,50,.14),
+      inset 14px 0 22px -12px rgba(90,60,30,.30);
+  }
+  .r-page .r-text { white-space: pre-wrap; word-wrap: break-word; }
+  .r-num {
+    position: absolute;
+    bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+    left: 0; right: 0; text-align: center;
+    font-size: 13px; color: #9a7a4e; font-family: Georgia, serif; font-style: italic;
+    letter-spacing: .5px;
+  }
+  /* ===== ЗАКЛАДКА-ЛЕНТОЧКА ===== */
+  .bookmark-ribbon {
+    position: absolute; top: 0; right: 30px; width: 26px; height: 0;
+    background: linear-gradient(180deg, #c0392b, #a52f22);
+    box-shadow: 1px 2px 5px rgba(0,0,0,.35);
+    z-index: 6; transition: height .35s cubic-bezier(.34,1.3,.5,1);
+    pointer-events: none;
+  }
+  .bookmark-ribbon.on { height: 74px; }
+  .bookmark-ribbon::after {
+    content: ""; position: absolute; left: 0; bottom: -11px;
+    border-left: 13px solid #a52f22; border-right: 13px solid #a52f22;
+    border-bottom: 11px solid transparent;
+  }
+  .r-page.flipping { box-shadow: -12px 0 30px rgba(0,0,0,.35); }
+  /* плавающая кнопка «поставить закладку» */
+  .set-bm-fab {
+    position: absolute; right: 18px;
+    bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+    width: 50px; height: 50px; border-radius: 50%;
+    background: rgba(30,25,20,.72); color: #fff; border: 1px solid rgba(255,255,255,.15);
+    font-size: 22px; z-index: 8; display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 4px 14px rgba(0,0,0,.4); backdrop-filter: blur(4px);
+  }
+  .set-bm-fab:active { transform: scale(.92); }
+  /* кнопка «к закладке» в шапке — горит, когда закладка стоит */
+  #goto-bm-btn.bm-active { color: #e04b39; }
+  .read-empty { display:flex; align-items:center; justify-content:center; height:100%; color:#8a6a44; font-style:italic; font-family:Georgia,serif; text-align:center; padding:0 40px; }
+
+  /* --- Заметки --- */
+  #notes-area {
+    position: absolute; inset: 0; padding: 18px 16px; font-size: 16px; line-height: 1.7;
+    color: var(--min-text); background: var(--min-bg); overflow-y: auto; outline: none; border: none; resize: none; width: 100%; font-family: inherit;
+  }
+  #notes-area::placeholder { color: var(--min-muted); }
+
+  /* --- Модалка --- */
+  .modal-bg {
+    position: absolute; inset: 0; background: rgba(0,0,0,.6); z-index: 50;
+    display: none; align-items: center; justify-content: center; padding: 24px;
+  }
+  .modal-bg.show { display: flex; }
+  .modal {
+    background: var(--min-panel); border: 1px solid var(--min-border); border-radius: 14px;
+    padding: 20px; width: 100%; max-width: 340px;
+  }
+  .modal h2 { font-size: 17px; margin-bottom: 14px; }
+  .modal input {
+    width: 100%; background: var(--min-bg); border: 1px solid var(--min-border); color: var(--min-text);
+    padding: 11px 12px; border-radius: 9px; font-size: 15px; outline: none; margin-bottom: 16px;
+  }
+  .modal input:focus { border-color: var(--min-accent); }
+  .modal-btns { display: flex; gap: 8px; }
+  .modal-btns button {
+    flex: 1; padding: 11px; border-radius: 9px; border: none; font-size: 14px; font-weight: 600;
+  }
+  .btn-cancel { background: var(--min-bg); color: var(--min-muted); border: 1px solid var(--min-border) !important; }
+  .btn-ok { background: var(--min-accent); color: #1a1a1a; }
+
+  .toast {
+    position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: var(--min-panel); border: 1px solid var(--min-border); color: var(--min-text);
+    padding: 10px 18px; border-radius: 10px; font-size: 13px; opacity: 0; pointer-events: none;
+    transition: opacity .25s, transform .25s; z-index: 60;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- БИБЛИОТЕКА -->
+  <div id="library">
+    <div class="lib-head">
+      <h1>Мои книги</h1>
+      <span id="lib-count"></span>
+    </div>
+    <div class="lib-list" id="lib-list"></div>
+    <button class="fab" id="add-book">+</button>
+  </div>
+
+  <!-- РЕДАКТОР -->
+  <div id="editor">
+    <div class="top-bar">
+      <button class="icon-btn" id="back-btn">‹</button>
+      <div class="book-title-top" id="cur-title">Книга</div>
+      <button class="icon-btn" id="goto-bm-btn" title="К закладке">☆</button>
+      <button class="icon-btn" id="rename-btn">✎</button>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" data-tab="write">Написание</button>
+      <button class="tab" data-tab="read">Чтение</button>
+      <button class="tab" data-tab="notes">Заметки</button>
+    </div>
+
+    <!-- Написание -->
+    <div class="panel" id="panel-write">
+      <div class="format-bar">
+        <button class="fmt" data-cmd="bold"><b>Ж</b></button>
+        <button class="fmt" data-cmd="italic"><i>К</i></button>
+        <button class="fmt" data-cmd="underline"><u>Ч</u></button>
+        <label class="fmt"><input type="color" id="fmt-color" value="#e6e8ec"></label>
+        <select class="fmt" id="fmt-size">
+          <option value="3">A-</option>
+          <option value="4" selected>A</option>
+          <option value="5">A+</option>
+          <option value="6">A++</option>
+        </select>
+      </div>
+      <div id="write-wrap">
+        <div class="swipe-zone" id="zone-left"><span class="swipe-hint">НАЗАД</span></div>
+        <div id="write-area" contenteditable="true" spellcheck="true"></div>
+        <div class="swipe-zone" id="zone-right"><span class="swipe-hint">ВПЕРЁД</span></div>
+        <div class="page-counter" id="write-counter">Страница 1</div>
+      </div>
+    </div>
+
+    <!-- Чтение -->
+    <div class="panel hidden" id="panel-read">
+      <div id="read-wrap"></div>
+      <button class="set-bm-fab" id="set-bm-btn" title="Поставить закладку">➕</button>
+    </div>
+
+    <!-- Заметки -->
+    <div class="panel hidden" id="panel-notes">
+      <textarea id="notes-area" placeholder="Заметки к книге: имена персонажей, сюжетные линии, идеи…"></textarea>
+    </div>
+  </div>
+
+  <!-- Модалка создания/переименования -->
+  <div class="modal-bg" id="modal">
+    <div class="modal">
+      <h2 id="modal-title">Новая книга</h2>
+      <input type="text" id="modal-input" placeholder="Название книги" maxlength="60">
+      <div class="modal-btns">
+        <button class="btn-cancel" id="modal-cancel">Отмена</button>
+        <button class="btn-ok" id="modal-ok">Создать</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+// ================== ДАННЫЕ ==================
+// В прототипе книги хранятся в памяти сессии. В настоящем PWA — в файлах телефона.
+let books = [];
+let currentId = null;
+let modalMode = 'create'; // 'create' | 'rename'
+
+// Страницы для режима чтения (разбивка по ~1200 симв)
+const CHARS_PER_PAGE = 1200;
+
+const $ = s => document.querySelector(s);
+const library = $('#library'), editor = $('#editor');
+
+// ================== БИБЛИОТЕКА ==================
+function renderLibrary(){
+  const list = $('#lib-list');
+  $('#lib-count').textContent = books.length ? books.length + (books.length===1?' книга':books.length<5?' книги':' книг') : '';
+  if(!books.length){
+    list.innerHTML = '<div class="lib-empty">Пока нет ни одной книги.<br>Нажмите + чтобы создать первую.</div>';
+    return;
+  }
+  list.innerHTML = '';
+  books.forEach(b=>{
+    const words = (b.text.replace(/<[^>]+>/g,' ').trim().match(/\S+/g)||[]).length;
+    const card = document.createElement('div');
+    card.className = 'book-card';
+    card.innerHTML = `
+      <div class="book-spine"></div>
+      <div class="book-info">
+        <h3></h3>
+        <p>${words} слов</p>
+      </div>
+      <div class="book-del">🗑</div>`;
+    card.querySelector('h3').textContent = b.title;
+    card.querySelector('.book-info').onclick = ()=> openBook(b.id);
+    card.querySelector('.book-spine').onclick = ()=> openBook(b.id);
+    card.querySelector('.book-del').onclick = (e)=>{ e.stopPropagation(); delBook(b.id); };
+    list.appendChild(card);
+  });
+}
+
+function delBook(id){
+  const b = books.find(x=>x.id===id);
+  if(confirm(`Удалить книгу «${b.title}»? Это действие нельзя отменить.`)){
+    books = books.filter(x=>x.id!==id);
+    renderLibrary();
+    toast('Книга удалена');
+  }
+}
+
+// ================== МОДАЛКА ==================
+function openModal(mode){
+  modalMode = mode;
+  $('#modal-title').textContent = mode==='create' ? 'Новая книга' : 'Переименовать книгу';
+  $('#modal-ok').textContent = mode==='create' ? 'Создать' : 'Сохранить';
+  $('#modal-input').value = mode==='rename' ? books.find(b=>b.id===currentId).title : '';
+  $('#modal').classList.add('show');
+  setTimeout(()=>$('#modal-input').focus(), 50);
+}
+function closeModal(){ $('#modal').classList.remove('show'); }
+$('#modal-cancel').onclick = closeModal;
+$('#modal-ok').onclick = ()=>{
+  const name = $('#modal-input').value.trim() || 'Без названия';
+  if(modalMode==='create'){
+    const b = { id: Date.now(), title: name, text: '', notes: '', page: 0 };
+    books.push(b); renderLibrary(); closeModal(); openBook(b.id);
+  } else {
+    books.find(b=>b.id===currentId).title = name;
+    $('#cur-title').textContent = name; renderLibrary(); closeModal();
+  }
+};
+$('#modal-input').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#modal-ok').click(); });
+$('#add-book').onclick = ()=> openModal('create');
+
+// ================== ОТКРЫТИЕ КНИГИ ==================
+function openBook(id){
+  currentId = id;
+  const b = books.find(x=>x.id===id);
+  $('#cur-title').textContent = b.title;
+  $('#write-area').innerHTML = b.text;
+  $('#notes-area').value = b.notes;
+  library.classList.add('hidden');
+  editor.classList.add('active');
+  switchTab('write');
+  updateWriteCounter();
+}
+$('#back-btn').onclick = ()=>{
+  saveCurrent();
+  editor.classList.remove('active');
+  library.classList.remove('hidden');
+  renderLibrary();
+};
+$('#rename-btn').onclick = ()=> openModal('rename');
+
+function saveCurrent(){
+  if(currentId==null) return;
+  const b = books.find(x=>x.id===currentId);
+  b.text = $('#write-area').innerHTML;
+  b.notes = $('#notes-area').value;
+}
+
+// ================== ВКЛАДКИ ==================
+function switchTab(tab){
+  document.querySelectorAll('.tab').forEach(t=> t.classList.toggle('active', t.dataset.tab===tab));
+  $('#panel-write').classList.toggle('hidden', tab!=='write');
+  $('#panel-read').classList.toggle('hidden', tab!=='read');
+  $('#panel-notes').classList.toggle('hidden', tab!=='notes');
+  if(tab==='read'){ saveCurrent(); buildReadPages(); }
+  $('#goto-bm-btn').style.display = (tab==='read') ? 'flex' : 'none';
+  $('#set-bm-btn').style.display  = (tab==='read') ? 'flex' : 'none';
+}
+document.querySelectorAll('.tab').forEach(t=> t.onclick = ()=> switchTab(t.dataset.tab));
+
+// ================== НАПИСАНИЕ: форматирование ==================
+document.querySelectorAll('.fmt[data-cmd]').forEach(btn=>{
+  btn.onmousedown = e=> e.preventDefault();
+  btn.onclick = ()=>{
+    document.execCommand(btn.dataset.cmd, false, null);
+    btn.classList.toggle('on', document.queryCommandState(btn.dataset.cmd));
+    $('#write-area').focus();
+  };
+});
+$('#fmt-color').oninput = e=>{ document.execCommand('foreColor', false, e.target.value); $('#write-area').focus(); };
+$('#fmt-size').onchange = e=>{ document.execCommand('fontSize', false, e.target.value); $('#write-area').focus(); };
+
+$('#write-area').addEventListener('input', ()=>{ saveCurrent(); updateWriteCounter(); });
+$('#write-area').addEventListener('keyup', updateFormatStates);
+$('#write-area').addEventListener('mouseup', updateFormatStates);
+function updateFormatStates(){
+  ['bold','italic','underline'].forEach(cmd=>{
+    const btn = document.querySelector(`.fmt[data-cmd="${cmd}"]`);
+    if(btn) btn.classList.toggle('on', document.queryCommandState(cmd));
+  });
+}
+function updateWriteCounter(){
+  const txt = $('#write-area').innerText || '';
+  const pages = Math.max(1, Math.ceil(txt.length / CHARS_PER_PAGE));
+  $('#write-counter').textContent = `Страниц: ${pages}`;
+}
+
+// ================== ЧТЕНИЕ: страницы + свайп-анимация ==================
+let readPages = [], readIdx = 0;
+
+function buildReadPages(){
+  const b = books.find(x=>x.id===currentId);
+  const plain = ($('#write-area').innerText || '').trim();
+  readPages = [];
+  const wrap = $('#read-wrap');
+  if(!plain){
+    wrap.innerHTML = '<div class="read-empty">Страницы появятся, когда вы напишете текст во вкладке «Написание».</div>';
+    return;
+  }
+
+  // Измеритель — невидимая страница с той же геометрией
+  const meas = document.createElement('div');
+  meas.className = 'r-page';
+  meas.style.visibility = 'hidden';
+  meas.innerHTML = '<div class="r-text"></div>';
+  wrap.innerHTML = '';
+  wrap.appendChild(meas);
+  const txtEl = meas.querySelector('.r-text');
+  // доступная высота под текст (минус паддинги и номер страницы)
+  const maxH = meas.clientHeight - 92;
+
+  // Разбиваем на «блоки»: сохраняем абзацы, внутри — предложения
+  const paragraphs = plain.split(/\n{2,}/);
+  // юниты: {type:'sentence', text} с маркерами конца абзаца
+  const units = [];
+  paragraphs.forEach((para, pi)=>{
+    const sentences = para.match(/[^.!?…]+[.!?…]+[»"')\]]*|\S.+$/g) || [para];
+    sentences.forEach(s=> units.push(s.trim()));
+    if(pi < paragraphs.length-1) units.push('\n\n'); // разрыв абзаца
+  });
+
+  let cur = '';
+  function fits(text){ txtEl.textContent = text; return txtEl.scrollHeight <= maxH; }
+
+  for(let i=0;i<units.length;i++){
+    const u = units[i];
+    if(u === '\n\n'){
+      // пробуем добавить разрыв абзаца
+      if(fits(cur + '\n\n')) cur += '\n\n';
+      else { readPages.push(cur.trim()); cur=''; }
+      continue;
+    }
+    const candidate = cur ? cur + ' ' + u : u;
+    if(fits(candidate)){
+      cur = candidate;
+    } else {
+      if(cur){ readPages.push(cur.trim()); cur=''; }
+      // одно предложение длиннее страницы — режем по словам
+      if(!fits(u)){
+        const words = u.split(' ');
+        let chunk='';
+        words.forEach(w=>{
+          if(fits(chunk ? chunk+' '+w : w)) chunk = chunk ? chunk+' '+w : w;
+          else { if(chunk) readPages.push(chunk.trim()); chunk=w; }
+        });
+        cur = chunk;
+      } else {
+        cur = u;
+      }
+    }
+  }
+  if(cur.trim()) readPages.push(cur.trim());
+
+  meas.remove();
+  readIdx = Math.min(b.page||0, Math.max(0, readPages.length-1));
+  renderReadPage();
+}
+
+function makePage(idx){
+  const el = document.createElement('div');
+  el.className = 'r-page';
+  el.innerHTML = `<div class="bookmark-ribbon"></div><div class="r-text"></div><div class="r-num">— ${idx+1} из ${readPages.length} —</div>`;
+  el.querySelector('.r-text').textContent = readPages[idx];
+  // ленточка видна, если на этой странице стоит закладка
+  if(getBookmark() === idx){
+    el.querySelector('.bookmark-ribbon').classList.add('on');
+  }
+  return el;
+}
+
+// ===== ЗАКЛАДКИ (сохраняются на устройстве через localStorage) =====
+function bmKey(){ return 'bookmark_' + currentId; }
+function getBookmark(){
+  const v = localStorage.getItem(bmKey());
+  return v === null ? -1 : parseInt(v, 10);
+}
+function setBookmark(idx){
+  localStorage.setItem(bmKey(), idx);
+  updateBookmarkUI();
+}
+function clearBookmark(){
+  localStorage.removeItem(bmKey());
+  updateBookmarkUI();
+}
+function toggleBookmark(){
+  if(getBookmark() === readIdx) clearBookmark();  // на этой же странице — снять
+  else setBookmark(readIdx);                       // иначе — поставить сюда
+  renderReadPage();                                // перерисовать ленточку
+}
+function gotoBookmark(){
+  const bm = getBookmark();
+  if(bm < 0) return;
+  readIdx = Math.min(bm, readPages.length - 1);
+  renderReadPage();
+}
+function updateBookmarkUI(){
+  const bm = getBookmark();
+  const gotoBtn = $('#goto-bm-btn');
+  const setBtn  = $('#set-bm-btn');
+  if(gotoBtn){
+    // кнопка «к закладке» горит, только если закладка стоит
+    gotoBtn.textContent = bm >= 0 ? '★' : '☆';
+    gotoBtn.classList.toggle('bm-active', bm >= 0);
+  }
+  if(setBtn){
+    // плавающая кнопка: заполнена, если закладка на текущей странице
+    const here = bm === readIdx;
+    setBtn.textContent = here ? '🔖' : '➕';
+    setBtn.title = here ? 'Убрать закладку' : 'Поставить закладку';
+  }
+}
+
+function renderReadPage(){
+  const wrap = $('#read-wrap');
+  wrap.innerHTML = '';
+  wrap.appendChild(makePage(readIdx));
+  updateBookmarkUI();
+}
+
+// свайп в зоне чтения
+function flipTo(dir){ // dir=+1 вперёд, -1 назад
+  const target = readIdx + dir;
+  if(target < 0 || target >= readPages.length) { rubberBand(dir); return; }
+  const wrap = $('#read-wrap');
+  const oldPage = wrap.querySelector('.r-page');
+  const newPage = makePage(target);
+
+  if(dir === +1){
+    // новая страница уже под текущей; текущая уезжает влево
+    wrap.insertBefore(newPage, oldPage);
+    oldPage.classList.add('flipping');
+    oldPage.style.transition = 'transform .38s cubic-bezier(.4,0,.2,1)';
+    requestAnimationFrame(()=>{ oldPage.style.transform = 'translateX(-100%)'; });
+    oldPage.addEventListener('transitionend', ()=>{ oldPage.remove(); }, {once:true});
+  } else {
+    // назад: новая страница въезжает слева поверх текущей
+    newPage.classList.add('flipping');
+    newPage.style.transform = 'translateX(-100%)';
+    wrap.appendChild(newPage);
+    newPage.style.transition = 'transform .38s cubic-bezier(.4,0,.2,1)';
+    requestAnimationFrame(()=>{ newPage.style.transform = 'translateX(0)'; });
+    newPage.addEventListener('transitionend', ()=>{ oldPage.remove(); newPage.classList.remove('flipping'); }, {once:true});
+  }
+  readIdx = target;
+  books.find(x=>x.id===currentId).page = readIdx;
+}
+
+function rubberBand(dir){
+  const p = $('#read-wrap').querySelector('.r-page');
+  if(!p) return;
+  p.style.transition = 'transform .18s';
+  p.style.transform = `translateX(${dir*-14}px)`;
+  setTimeout(()=>{ p.style.transform='translateX(0)'; }, 160);
+}
+
+// ================== ОБРАБОТКА СВАЙПОВ ==================
+function addSwipe(el, onSwipe, minDist=40){
+  let x0=null, y0=null, t0=0;
+  el.addEventListener('touchstart', e=>{ const t=e.touches[0]; x0=t.clientX; y0=t.clientY; t0=Date.now(); }, {passive:true});
+  el.addEventListener('touchend', e=>{
+    if(x0==null) return;
+    const t=e.changedTouches[0];
+    const dx=t.clientX-x0, dy=t.clientY-y0, dt=Date.now()-t0;
+    if(Math.abs(dx)>minDist && Math.abs(dx)>Math.abs(dy) && dt<700){
+      onSwipe(dx<0 ? +1 : -1);
+    }
+    x0=y0=null;
+  }, {passive:true});
+  // мышь — для теста в браузере на ПК
+  el.addEventListener('mousedown', e=>{ x0=e.clientX; y0=e.clientY; t0=Date.now(); });
+  el.addEventListener('mouseup', e=>{
+    if(x0==null) return;
+    const dx=e.clientX-x0, dy=e.clientY-y0, dt=Date.now()-t0;
+    if(Math.abs(dx)>minDist && Math.abs(dx)>Math.abs(dy) && dt<700){ onSwipe(dx<0 ? +1 : -1); }
+    x0=y0=null;
+  });
+}
+
+// Чтение — свайп по всей области (навешиваем на контейнер, страницы внутри pointer-events сквозные для свайпа)
+addSwipe($('#read-wrap'), dir=> flipTo(dir), 35);
+
+// Кнопки закладки
+$('#set-bm-btn').addEventListener('click', toggleBookmark);
+$('#goto-bm-btn').addEventListener('click', gotoBookmark);
+
+// Написание — свайп ТОЛЬКО в боковых зонах
+// Левая зона: свайп слева-направо = назад. Правая зона: справа-налево = вперёд.
+addSwipe($('#zone-left'), dir=>{ if(dir<0) flipWritePage(-1); });
+addSwipe($('#zone-right'), dir=>{ if(dir>0) flipWritePage(+1); });
+
+// В режиме написания «страницы» условны — просто показываем счётчик и мигаем.
+// (Текст непрерывный; перелистывание прокручивает поле к следующему экрану.)
+function flipWritePage(dir){
+  const area = $('#write-area');
+  const step = area.clientHeight * 0.9;
+  area.scrollBy({ top: dir*step, behavior:'smooth' });
+  const p = $('#write-counter');
+  p.style.transition='transform .15s'; p.style.transform='translateX(-50%) scale(1.15)';
+  setTimeout(()=>p.style.transform='translateX(-50%) scale(1)',160);
+}
+
+$('#notes-area').addEventListener('input', saveCurrent);
+
+// ================== TOAST ==================
+let toastT;
+function toast(msg){
+  const el = $('#toast'); el.textContent = msg; el.classList.add('show');
+  clearTimeout(toastT); toastT = setTimeout(()=> el.classList.remove('show'), 1800);
+}
+
+// ================== СТАРТ ==================
+// Демо-книга, чтобы сразу было что полистать
+books.push({
+  id: 1, title: 'Один среди волков', page: 0,
+  notes: 'Главный герой — Мстислав. Русский среди финнов.\nДом Вэняляинэн.\nДевиз: «Один среди волков».',
+  text: `Снег ложился на крыши Оулу третий день подряд, и Мстислав знал — эта зима будет не последним испытанием.\n\nОн стоял у окна длинного дома, глядя, как ветер несёт белые хлопья над замёрзшим заливом. Чужак на чужой земле. Так его называли финны, и он давно перестал спорить.\n\n«Пусть говорят, — думал он. — Волки тоже воют, когда чуют силу».\n\nЗа спиной скрипнула дверь. Вошёл епископ Иван, стряхивая снег с плеч.\n\n— Вести с юга, господин, — произнёс он глухо. — Саво собирает людей.\n\nМстислав не обернулся. Он смотрел на звезду, что зажглась над лесом — первую в эту долгую ночь. Одну. Среди тьмы.\n\n— Пусть собирают, — сказал он наконец. — У волка тоже есть клыки.`
+});
+renderLibrary();
+</script>
+</body>
+</html>
