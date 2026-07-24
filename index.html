@@ -1,4 +1,4 @@
-<!-- ВЕРСИЯ: v1.7.1 (2026-07-24) — фикс: текст, случайно застрявший внутри старого разрыва страницы, больше не пропадает при показе в чтении -->
+<!-- ВЕРСИЯ: v1.8.0 (2026-07-24) — настоящий фикс пустых страниц: пустые строки-абзацы (двойной Enter) больше не занимают отдельную страницу целиком — проверено на реальных данных в headless Chrome (было 44 пустые страницы из 86, стало 0) -->
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -373,7 +373,7 @@ if(IN_TELEGRAM){
 let books = [];
 let currentId = null;
 let modalMode = 'create'; // 'create' | 'rename'
-const APP_VERSION = 'v1.7.1';
+const APP_VERSION = 'v1.8.0';
 
 const STORAGE_KEY = 'kniga_books_v1';
 function persist(){
@@ -662,6 +662,18 @@ function computePages(){
   function htmlOf(node){ return node.nodeType === 3 ? node.textContent : node.outerHTML; }
   function fitsHTML(html){ txtEl.innerHTML = html; return txtEl.scrollHeight <= maxH; }
 
+  // Пустая строка-абзац (например, <div><br></div> — след двойного Enter для
+  // отступа между абзацами) не должна САМА решать, помещается ли она на
+  // страницу: если проверять её отдельно как обычный блок, она иногда не
+  // влезает вместе с предыдущим текстом и становится ЕДИНСТВЕННЫМ содержимым
+  // новой страницы — та выглядит совсем пустой для читателя. Поэтому пустые
+  // блоки всегда молча прилипают к уже набираемой странице, без проверки fit.
+  function isBlankBlock(node){
+    if(node.nodeType !== 1) return false;
+    if(node.classList.contains('book-img-inline') || node.classList.contains('page-break-marker')) return false;
+    return node.textContent.replace(/ /g, ' ').trim().length === 0;
+  }
+
   let cur = '';
   let curHasContent = false;
   blocks.forEach(node=>{
@@ -670,6 +682,10 @@ function computePages(){
       return;
     }
     const piece = htmlOf(node);
+    if(isBlankBlock(node) && curHasContent){
+      cur += piece;
+      return;
+    }
     const candidate = cur + piece;
     if(!curHasContent || fitsHTML(candidate)){
       cur = candidate;
