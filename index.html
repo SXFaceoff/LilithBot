@@ -1,4 +1,4 @@
-<!-- ВЕРСИЯ: v1.6.0 (2026-07-24) — экспорт/импорт книг в файл, чтобы переносить их между локальным тестом и развёрнутой версией (localStorage не общий между origin) -->
+<!-- ВЕРСИЯ: v1.6.1 (2026-07-24) — фикс: экспорт/импорт был вставлен до объявления переменной $, из-за чего скрипт падал на чистой загрузке и библиотека была пустой -->
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -357,7 +357,7 @@
 let books = [];
 let currentId = null;
 let modalMode = 'create'; // 'create' | 'rename'
-const APP_VERSION = 'v1.6.0';
+const APP_VERSION = 'v1.6.1';
 
 const STORAGE_KEY = 'kniga_books_v1';
 function persist(){
@@ -418,6 +418,12 @@ function fileToResizedDataURL(file, maxDim){
   });
 }
 
+// Страницы для режима чтения (разбивка по ~1200 симв)
+const CHARS_PER_PAGE = 1200;
+
+const $ = s => document.querySelector(s);
+const library = $('#library'), editor = $('#editor');
+
 // ================== ЭКСПОРТ / ИМПОРТ ==================
 // localStorage привязан к конкретному origin (домену/протоколу) — локальный
 // файл на компьютере (file://) и развёрнутая версия на GitHub Pages (https://)
@@ -469,12 +475,6 @@ $('#import-file-input').addEventListener('change', e=>{
   };
   reader.readAsText(file);
 });
-
-// Страницы для режима чтения (разбивка по ~1200 симв)
-const CHARS_PER_PAGE = 1200;
-
-const $ = s => document.querySelector(s);
-const library = $('#library'), editor = $('#editor');
 
 // ================== БИБЛИОТЕКА ==================
 function renderLibrary(){
