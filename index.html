@@ -1,4 +1,4 @@
-<!-- ВЕРСИЯ: v1.7.0 (2026-07-24) — режим читателя: внутри Telegram книга открывается сразу на вкладке «Чтение», вкладки редактирования скрыты -->
+<!-- ВЕРСИЯ: v1.7.1 (2026-07-24) — фикс: текст, случайно застрявший внутри старого разрыва страницы, больше не пропадает при показе в чтении -->
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -373,7 +373,7 @@ if(IN_TELEGRAM){
 let books = [];
 let currentId = null;
 let modalMode = 'create'; // 'create' | 'rename'
-const APP_VERSION = 'v1.7.0';
+const APP_VERSION = 'v1.7.1';
 
 const STORAGE_KEY = 'kniga_books_v1';
 function persist(){
@@ -708,7 +708,21 @@ function makePage(idx){
   // Подстраховка: разрыв страницы не должен быть виден при чтении никогда —
   // даже если он оказался вложен внутрь абзаца (например, остался от вставки
   // до фикса в v1.5.0) и поэтому не был пойман как верхнеуровневый блок.
-  textEl.querySelectorAll('.page-break-marker').forEach(m=> m.remove());
+  // Осторожно: у старых разрывов (вставленных ДО фикса) внутрь мог случайно
+  // затесаться настоящий текст абзаца — если внутри маркера есть что-то, кроме
+  // одной текстовой подписи «✂ Разрыв страницы», этот текст сохраняем, вынося
+  // его наружу, а не теряем вместе с маркером.
+  textEl.querySelectorAll('.page-break-marker').forEach(m=>{
+    const onlyLabel = m.childNodes.length === 1 && m.firstChild.nodeType === 3;
+    if(onlyLabel){
+      m.remove();
+      return;
+    }
+    const labelNode = Array.from(m.childNodes).find(n=> n.nodeType===3 && n.textContent.includes('Разрыв страницы'));
+    if(labelNode) labelNode.remove();
+    while(m.firstChild) m.parentNode.insertBefore(m.firstChild, m);
+    m.remove();
+  });
   // ленточка видна, если на этой странице стоит закладка
   if(getBookmark() === idx){
     el.querySelector('.bookmark-ribbon').classList.add('on');
