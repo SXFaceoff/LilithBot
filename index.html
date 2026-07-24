@@ -1,3 +1,4 @@
+<!-- ВЕРСИЯ: v1.5.2 (2026-07-24) — разрыв страницы больше никогда не виден в режиме чтения, даже если застрял внутри абзаца из-за старой вставки -->
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -144,7 +145,7 @@
       inset 0 0 70px rgba(120,90,50,.14),
       inset 14px 0 22px -12px rgba(90,60,30,.30);
   }
-  .r-page .r-text { white-space: pre-wrap; word-wrap: break-word; }
+  .r-page .r-text { word-wrap: break-word; display: flow-root; }
   .r-num {
     position: absolute;
     bottom: calc(20px + env(safe-area-inset-bottom, 0px));
@@ -180,6 +181,46 @@
   /* кнопка «к закладке» в шапке — горит, когда закладка стоит */
   #goto-bm-btn.bm-active { color: #e04b39; }
   .read-empty { display:flex; align-items:center; justify-content:center; height:100%; color:#8a6a44; font-style:italic; font-family:Georgia,serif; text-align:center; padding:0 40px; }
+
+  /* --- Картинки в тексте (обтекание, как в Ворде) --- */
+  /* .book-img-inline попадает и в write-area (тёмная тема), и в напечатанный
+     .r-text страницы чтения (бумажная тема) — оформление плавающего блока
+     одно и то же в обоих местах, специфика через контекстные селекторы ниже. */
+  .book-img-inline { margin-bottom: 8px; position: relative; }
+  .book-img-inline.float-left { float: left; margin-right: 14px; }
+  .book-img-inline.float-right { float: right; margin-left: 14px; }
+  .book-img-inline.centered { float: none; display: block; margin: 10px auto 14px; clear: both; }
+  .book-img-inline img { width: 100%; height: auto; display: block; border-radius: 4px; user-select: none; -webkit-user-drag: none; }
+
+  #write-area .book-img-inline { cursor: pointer; outline: 1px solid transparent; border-radius: 4px; }
+  #write-area .book-img-inline.selected { outline: 2px dashed var(--min-accent); }
+  .img-toolbar {
+    position: absolute; top: -36px; left: 0; display: flex; gap: 3px;
+    background: var(--min-panel); border: 1px solid var(--min-border); border-radius: 8px; padding: 3px;
+    z-index: 5; box-shadow: 0 4px 10px rgba(0,0,0,.4);
+  }
+  .img-toolbar.below { top: auto; bottom: -36px; }
+  .img-toolbar button { background: none; border: none; color: var(--min-text); font-size: 14px; padding: 5px 7px; border-radius: 5px; }
+  .img-toolbar button:active { background: rgba(255,255,255,.12); }
+  .img-resize {
+    position: absolute; right: -8px; bottom: -8px; width: 20px; height: 20px; border-radius: 50%;
+    background: var(--min-accent); border: 2px solid #1a1a1a; cursor: nwse-resize; touch-action: none; z-index: 5;
+  }
+  .img-move {
+    position: absolute; left: -8px; top: -8px; width: 22px; height: 22px; border-radius: 50%;
+    background: var(--min-panel); border: 2px solid var(--min-accent); color: var(--min-accent);
+    font-size: 12px; display: flex; align-items: center; justify-content: center;
+    cursor: move; touch-action: none; z-index: 5;
+  }
+  .move-indicator { height: 3px; background: var(--min-accent); margin: 4px 0; border-radius: 2px; clear: both; }
+
+  /* Ручной разрыв страницы — виден и кликабелен только во время написания;
+     сама разбивка на страницы просто пропускает этот блок как содержимое. */
+  .page-break-marker {
+    clear: both; margin: 10px 0; padding: 6px 10px; border-radius: 6px;
+    background: rgba(201,163,94,.12); border: 1px dashed var(--min-accent);
+    color: var(--min-accent); font-size: 12px; text-align: center; cursor: pointer; user-select: none;
+  }
 
   /* --- Заметки --- */
   #notes-area {
@@ -227,7 +268,10 @@
   <div id="library">
     <div class="lib-head">
       <h1>Мои книги</h1>
-      <span id="lib-count"></span>
+      <div style="display:flex; flex-direction:column; align-items:flex-end; gap:2px;">
+        <span id="lib-count"></span>
+        <span id="app-version" style="font-size:10px; color: var(--min-muted); opacity:.6;"></span>
+      </div>
     </div>
     <div class="lib-list" id="lib-list"></div>
     <button class="fab" id="add-book">+</button>
@@ -261,6 +305,9 @@
           <option value="5">A+</option>
           <option value="6">A++</option>
         </select>
+        <button class="fmt" id="fmt-image" title="Вставить изображение">🖼</button>
+        <button class="fmt" id="fmt-pagebreak" title="Разрыв страницы">✂️📄</button>
+        <input type="file" id="write-img-input" accept="image/*" style="display:none">
       </div>
       <div id="write-wrap">
         <div class="swipe-zone" id="zone-left"><span class="swipe-hint">НАЗАД</span></div>
@@ -299,10 +346,72 @@
 
 <script>
 // ================== ДАННЫЕ ==================
-// В прототипе книги хранятся в памяти сессии. В настоящем PWA — в файлах телефона.
+// Книги хранятся в localStorage браузера/webview — переживают перезагрузку
+// страницы. Это НЕ синхронизация между устройствами: на другом телефоне или
+// после очистки данных сайта в Telegram библиотека будет пустой.
 let books = [];
 let currentId = null;
 let modalMode = 'create'; // 'create' | 'rename'
+const APP_VERSION = 'v1.5.2';
+
+const STORAGE_KEY = 'kniga_books_v1';
+function persist(){
+  try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(books)); }
+  catch(e){ toast('Не удалось сохранить: не хватает места на устройстве'); console.error('persist failed', e); }
+}
+let persistTimer;
+function persistDebounced(){ clearTimeout(persistTimer); persistTimer = setTimeout(persist, 600); }
+function loadBooks(){
+  try{
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if(!raw) return false;
+    const parsed = JSON.parse(raw);
+    if(!Array.isArray(parsed) || !parsed.length) return false;
+    books = parsed.map(b=>{
+      const nb = { notes: '', page: 0, ...b };
+      // Миграция со старой модели (v1.1/v1.2): картинки лежали отдельным
+      // слоем поверх страницы. Теперь картинка — часть самого текста, поэтому
+      // переносим их в конец текста как плавающие блоки (позиция на странице
+      // не сохранится, но сама картинка не потеряется).
+      if(Array.isArray(nb.images) && nb.images.length){
+        const extra = nb.images.map(im=>
+          `<div class="book-img-inline float-left" contenteditable="false" style="width:${Math.round((im.w||0.35)*100)}%"><img src="${im.src}"></div>`
+        ).join('');
+        nb.text = (nb.text||'') + extra;
+      }
+      delete nb.images;
+      return nb;
+    });
+    return true;
+  }catch(e){ console.error('Не удалось прочитать сохранённые книги', e); return false; }
+}
+
+// Уменьшает и пережимает картинку перед сохранением — иначе фото с телефона
+// (по 3-5 МБ каждое) быстро упрутся в лимит localStorage (обычно 5-10 МБ).
+function fileToResizedDataURL(file, maxDim){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      const img = new Image();
+      img.onload = ()=>{
+        let { width, height } = img;
+        if(width > maxDim || height > maxDim){
+          const scale = maxDim / Math.max(width, height);
+          width = Math.round(width*scale);
+          height = Math.round(height*scale);
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.85));
+      };
+      img.onerror = reject;
+      img.src = reader.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 
 // Страницы для режима чтения (разбивка по ~1200 симв)
 const CHARS_PER_PAGE = 1200;
@@ -344,6 +453,7 @@ function delBook(id){
     books = books.filter(x=>x.id!==id);
     renderLibrary();
     toast('Книга удалена');
+    persist();
   }
 }
 
@@ -362,10 +472,10 @@ $('#modal-ok').onclick = ()=>{
   const name = $('#modal-input').value.trim() || 'Без названия';
   if(modalMode==='create'){
     const b = { id: Date.now(), title: name, text: '', notes: '', page: 0 };
-    books.push(b); renderLibrary(); closeModal(); openBook(b.id);
+    books.push(b); renderLibrary(); closeModal(); openBook(b.id); persist();
   } else {
     books.find(b=>b.id===currentId).title = name;
-    $('#cur-title').textContent = name; renderLibrary(); closeModal();
+    $('#cur-title').textContent = name; renderLibrary(); closeModal(); persist();
   }
 };
 $('#modal-input').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#modal-ok').click(); });
@@ -388,13 +498,20 @@ $('#back-btn').onclick = ()=>{
   editor.classList.remove('active');
   library.classList.remove('hidden');
   renderLibrary();
+  persist();
 };
 $('#rename-btn').onclick = ()=> openModal('rename');
 
 function saveCurrent(){
   if(currentId==null) return;
   const b = books.find(x=>x.id===currentId);
-  b.text = $('#write-area').innerHTML;
+  // Сохраняем не живой DOM напрямую, а его копию с вычищенными служебными
+  // элементами редактирования (тулбар/ручки картинки) — иначе, если картинка
+  // была выделена в момент сохранения, эти кнопки утекут в текст книги.
+  const clone = $('#write-area').cloneNode(true);
+  clone.querySelectorAll('.img-toolbar, .img-resize, .img-move, .move-indicator').forEach(el=> el.remove());
+  clone.querySelectorAll('.book-img-inline.selected').forEach(el=> el.classList.remove('selected'));
+  b.text = clone.innerHTML;
   b.notes = $('#notes-area').value;
 }
 
@@ -404,6 +521,7 @@ function switchTab(tab){
   $('#panel-write').classList.toggle('hidden', tab!=='write');
   $('#panel-read').classList.toggle('hidden', tab!=='read');
   $('#panel-notes').classList.toggle('hidden', tab!=='notes');
+  if(tab!=='write') deselectImg();
   if(tab==='read'){ saveCurrent(); buildReadPages(); }
   $('#goto-bm-btn').style.display = (tab==='read') ? 'flex' : 'none';
   $('#set-bm-btn').style.display  = (tab==='read') ? 'flex' : 'none';
@@ -422,7 +540,7 @@ document.querySelectorAll('.fmt[data-cmd]').forEach(btn=>{
 $('#fmt-color').oninput = e=>{ document.execCommand('foreColor', false, e.target.value); $('#write-area').focus(); };
 $('#fmt-size').onchange = e=>{ document.execCommand('fontSize', false, e.target.value); $('#write-area').focus(); };
 
-$('#write-area').addEventListener('input', ()=>{ saveCurrent(); updateWriteCounter(); });
+$('#write-area').addEventListener('input', ()=>{ saveCurrent(); updateWriteCounter(); persistDebounced(); });
 $('#write-area').addEventListener('keyup', updateFormatStates);
 $('#write-area').addEventListener('mouseup', updateFormatStates);
 function updateFormatStates(){
@@ -440,70 +558,70 @@ function updateWriteCounter(){
 // ================== ЧТЕНИЕ: страницы + свайп-анимация ==================
 let readPages = [], readIdx = 0;
 
-function buildReadPages(){
-  const b = books.find(x=>x.id===currentId);
-  const plain = ($('#write-area').innerText || '').trim();
+// Вычисляет разбивку на страницы (readPages — массив HTML-строк, не plain
+// text: так в «Чтении» сохраняются и форматирование, и картинки-обтекания).
+// Единица разбивки — не предложение, а верхнеуровневый блок write-area
+// (абзац/строка/картинка/разрыв страницы). Из-за этого при сильных правках
+// текста ДО картинки она может «переехать» на другую страницу — цена за то,
+// что картинки и текст теперь по-настоящему связаны, а не наложены поверх.
+function computePages(){
   readPages = [];
-  const wrap = $('#read-wrap');
-  if(!plain){
-    wrap.innerHTML = '<div class="read-empty">Страницы появятся, когда вы напишете текст во вкладке «Написание».</div>';
-    return;
-  }
+  const writeArea = $('#write-area');
+  const blocks = Array.from(writeArea.childNodes).filter(n=>{
+    if(n.nodeType === 3) return n.textContent.trim().length > 0; // непустой текстовый узел
+    return n.nodeType === 1; // любой элемент (абзац, картинка, разрыв страницы)
+  });
+  if(!blocks.length) return;
+
+  const panelRead = $('#panel-read');
+  const wasHidden = panelRead.classList.contains('hidden');
+  if(wasHidden) panelRead.style.display = 'block';
 
   // Измеритель — невидимая страница с той же геометрией
   const meas = document.createElement('div');
   meas.className = 'r-page';
   meas.style.visibility = 'hidden';
   meas.innerHTML = '<div class="r-text"></div>';
-  wrap.innerHTML = '';
-  wrap.appendChild(meas);
+  panelRead.appendChild(meas);
   const txtEl = meas.querySelector('.r-text');
-  // доступная высота под текст (минус паддинги и номер страницы)
   const maxH = meas.clientHeight - 92;
 
-  // Разбиваем на «блоки»: сохраняем абзацы, внутри — предложения
-  const paragraphs = plain.split(/\n{2,}/);
-  // юниты: {type:'sentence', text} с маркерами конца абзаца
-  const units = [];
-  paragraphs.forEach((para, pi)=>{
-    const sentences = para.match(/[^.!?…]+[.!?…]+[»"')\]]*|\S.+$/g) || [para];
-    sentences.forEach(s=> units.push(s.trim()));
-    if(pi < paragraphs.length-1) units.push('\n\n'); // разрыв абзаца
-  });
+  function htmlOf(node){ return node.nodeType === 3 ? node.textContent : node.outerHTML; }
+  function fitsHTML(html){ txtEl.innerHTML = html; return txtEl.scrollHeight <= maxH; }
 
   let cur = '';
-  function fits(text){ txtEl.textContent = text; return txtEl.scrollHeight <= maxH; }
-
-  for(let i=0;i<units.length;i++){
-    const u = units[i];
-    if(u === '\n\n'){
-      // пробуем добавить разрыв абзаца
-      if(fits(cur + '\n\n')) cur += '\n\n';
-      else { readPages.push(cur.trim()); cur=''; }
-      continue;
+  let curHasContent = false;
+  blocks.forEach(node=>{
+    if(node.nodeType===1 && node.classList.contains('page-break-marker')){
+      if(curHasContent){ readPages.push(cur); cur=''; curHasContent=false; }
+      return;
     }
-    const candidate = cur ? cur + ' ' + u : u;
-    if(fits(candidate)){
+    const piece = htmlOf(node);
+    const candidate = cur + piece;
+    if(!curHasContent || fitsHTML(candidate)){
       cur = candidate;
+      curHasContent = true;
     } else {
-      if(cur){ readPages.push(cur.trim()); cur=''; }
-      // одно предложение длиннее страницы — режем по словам
-      if(!fits(u)){
-        const words = u.split(' ');
-        let chunk='';
-        words.forEach(w=>{
-          if(fits(chunk ? chunk+' '+w : w)) chunk = chunk ? chunk+' '+w : w;
-          else { if(chunk) readPages.push(chunk.trim()); chunk=w; }
-        });
-        cur = chunk;
-      } else {
-        cur = u;
-      }
+      readPages.push(cur);
+      cur = piece;
+      curHasContent = true;
     }
-  }
-  if(cur.trim()) readPages.push(cur.trim());
+  });
+  if(curHasContent) readPages.push(cur);
 
   meas.remove();
+  if(wasHidden) panelRead.style.display = '';
+}
+
+// Читалка: пересчитывает страницы и сразу их отображает (с пустым состоянием).
+function buildReadPages(){
+  computePages();
+  const b = books.find(x=>x.id===currentId);
+  const wrap = $('#read-wrap');
+  if(!readPages.length){
+    wrap.innerHTML = '<div class="read-empty">Страницы появятся, когда вы напишете текст или добавите картинку во вкладке «Написание».</div>';
+    return;
+  }
   readIdx = Math.min(b.page||0, Math.max(0, readPages.length-1));
   renderReadPage();
 }
@@ -512,7 +630,12 @@ function makePage(idx){
   const el = document.createElement('div');
   el.className = 'r-page';
   el.innerHTML = `<div class="bookmark-ribbon"></div><div class="r-text"></div><div class="r-num">— ${idx+1} из ${readPages.length} —</div>`;
-  el.querySelector('.r-text').textContent = readPages[idx];
+  const textEl = el.querySelector('.r-text');
+  textEl.innerHTML = readPages[idx];
+  // Подстраховка: разрыв страницы не должен быть виден при чтении никогда —
+  // даже если он оказался вложен внутрь абзаца (например, остался от вставки
+  // до фикса в v1.5.0) и поэтому не был пойман как верхнеуровневый блок.
+  textEl.querySelectorAll('.page-break-marker').forEach(m=> m.remove());
   // ленточка видна, если на этой странице стоит закладка
   if(getBookmark() === idx){
     el.querySelector('.bookmark-ribbon').classList.add('on');
@@ -541,7 +664,7 @@ function toggleBookmark(){
 }
 function gotoBookmark(){
   const bm = getBookmark();
-  if(bm < 0) return;
+  if(bm < 0){ toast('Закладка ещё не поставлена — нажмите ➕ на странице'); return; }
   readIdx = Math.min(bm, readPages.length - 1);
   renderReadPage();
 }
@@ -605,6 +728,212 @@ function rubberBand(dir){
   setTimeout(()=>{ p.style.transform='translateX(0)'; }, 160);
 }
 
+// ================== КАРТИНКИ В ТЕКСТЕ (обтекание, как в Ворде) ==================
+// Картинка вставляется прямо в write-area как contenteditable="false"-виджет
+// (.book-img-inline) с классом float-left/float-right — реальный CSS float,
+// поэтому текст обтекает её и в момент написания, и в «Чтении» (та же разметка
+// просто копируется в HTML нужной страницы при пересчёте computePages()).
+// Свободного перетаскивания по XY больше нет — это принципиальное ограничение
+// самого CSS-обтекания: картинка «привязана» к месту в тексте, двигать её
+// можно только раньше/позже по потоку (ручка ✥) и менять сторону лева/права.
+
+function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+
+// Range.getBoundingClientRect работает и для текстовых узлов — нужно, чтобы
+// ручка перемещения ориентировалась и на абзацы-<div>, и на голые строки текста.
+function getRectOf(node){
+  if(node.nodeType === 1) return node.getBoundingClientRect();
+  const r = document.createRange();
+  r.selectNodeContents(node);
+  return r.getBoundingClientRect();
+}
+
+let selectedImgWidget = null;
+
+function deselectImg(){
+  if(selectedImgWidget){
+    selectedImgWidget.classList.remove('selected');
+    selectedImgWidget.querySelectorAll('.img-toolbar, .img-resize, .img-move').forEach(el=> el.remove());
+  }
+  selectedImgWidget = null;
+}
+
+function selectImg(widget){
+  if(selectedImgWidget === widget) return;
+  deselectImg();
+  selectedImgWidget = widget;
+  widget.classList.add('selected');
+
+  const tb = document.createElement('div');
+  tb.className = 'img-toolbar';
+  tb.contentEditable = 'false';
+  tb.innerHTML =
+    '<button data-act="left" title="Обтекание слева">⬅</button>' +
+    '<button data-act="center" title="По центру, без обтекания"><b>Ц</b></button>' +
+    '<button data-act="right" title="Обтекание справа">➡</button>' +
+    '<button data-act="del" title="Удалить">🗑</button>';
+  tb.addEventListener('click', e=>{
+    const act = e.target.closest('button') && e.target.closest('button').dataset.act;
+    if(!act) return;
+    e.preventDefault(); e.stopPropagation();
+    if(act==='left'){ widget.classList.remove('float-right','centered'); widget.classList.add('float-left'); }
+    if(act==='center'){ widget.classList.remove('float-left','float-right'); widget.classList.add('centered'); }
+    if(act==='right'){ widget.classList.remove('float-left','centered'); widget.classList.add('float-right'); }
+    if(act==='del'){ widget.remove(); deselectImg(); saveCurrent(); persistDebounced(); return; }
+    saveCurrent(); persistDebounced();
+  });
+  widget.appendChild(tb);
+  // Если картинка стоит у самого верха написанного (места над ней нет) —
+  // тулбар разворачивается вниз, а не рисуется над картинкой впритык к панели
+  // форматирования (как было видно на скриншоте — там он оказывался зажат).
+  const writeRect = $('#write-area').getBoundingClientRect();
+  const widgetRect = widget.getBoundingClientRect();
+  if(widgetRect.top - writeRect.top < 40) tb.classList.add('below');
+
+  const resizeHandle = document.createElement('div');
+  resizeHandle.className = 'img-resize';
+  resizeHandle.title = 'Изменить размер';
+  widget.appendChild(resizeHandle);
+  attachResizeHandle(resizeHandle, widget);
+
+  const moveHandle = document.createElement('div');
+  moveHandle.className = 'img-move';
+  moveHandle.title = 'Перетащить по тексту';
+  moveHandle.textContent = '✥';
+  widget.appendChild(moveHandle);
+  attachMoveHandle(moveHandle, widget);
+}
+
+function attachResizeHandle(handle, widget){
+  handle.addEventListener('pointerdown', e=>{
+    e.preventDefault(); e.stopPropagation();
+    handle.setPointerCapture(e.pointerId);
+    const containerWidth = $('#write-area').clientWidth;
+    const startX = e.clientX;
+    const startPct = parseFloat(widget.style.width) || 35;
+    function onMove(ev){
+      const deltaPct = ((ev.clientX-startX)/containerWidth)*100;
+      widget.style.width = clamp(startPct + deltaPct, 15, 85) + '%';
+    }
+    function onUp(){
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onUp);
+      saveCurrent(); persistDebounced();
+    }
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onUp, {once:true});
+  });
+}
+
+// Отдельный инструмент перемещения: тащишь ручку ✥ вверх/вниз по тексту,
+// между абзацами появляется полоска-индикатор куда встанет картинка, отпустил
+// — картинка переезжает туда. Надёжнее старых кнопок ▲/▼, которые переставляли
+// картинку с ближайшим DOM-соседом «в слепую» (мог оказаться пустой обрывок).
+function attachMoveHandle(handle, widget){
+  handle.addEventListener('pointerdown', e=>{
+    e.preventDefault(); e.stopPropagation();
+    handle.setPointerCapture(e.pointerId);
+    const writeArea = $('#write-area');
+    const indicator = document.createElement('div');
+    indicator.className = 'move-indicator';
+    indicator.contentEditable = 'false';
+    let target = null, before = true;
+
+    function updateTarget(clientY){
+      const candidates = Array.from(writeArea.childNodes).filter(n=>
+        n!==widget && n!==indicator &&
+        (n.nodeType===1 || (n.nodeType===3 && n.textContent.trim()))
+      );
+      let bestNode = null, bestDist = Infinity, bestBefore = true;
+      candidates.forEach(n=>{
+        const rect = getRectOf(n);
+        if(!rect || (rect.width===0 && rect.height===0)) return;
+        const mid = rect.top + rect.height/2;
+        const dist = Math.abs(clientY - mid);
+        if(dist < bestDist){ bestDist = dist; bestNode = n; bestBefore = clientY < mid; }
+      });
+      if(bestNode){
+        target = bestNode; before = bestBefore;
+        writeArea.insertBefore(indicator, before ? target : target.nextSibling);
+      }
+    }
+
+    function onMove(ev){ updateTarget(ev.clientY); }
+    function onUp(){
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onUp);
+      if(target) writeArea.insertBefore(widget, before ? target : target.nextSibling);
+      indicator.remove();
+      deselectImg();
+      selectImg(widget);
+      saveCurrent(); persistDebounced();
+    }
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onUp, {once:true});
+  });
+}
+
+// Клик по картинке — выделить (показать тулбар); клик по разрыву — убрать его;
+// клик в пустое место — снять выделение.
+$('#write-area').addEventListener('click', e=>{
+  const marker = e.target.closest('.page-break-marker');
+  if(marker){ marker.remove(); saveCurrent(); persistDebounced(); toast('Разрыв убран'); return; }
+  const widget = e.target.closest('.book-img-inline');
+  if(widget) selectImg(widget); else deselectImg();
+});
+
+// Вставляет узел на месте курсора через execCommand('insertHTML', ...) —
+// в отличие от range.insertNode(), это заставляет браузер САМ разрезать
+// окружающий абзац на «до» и «после», так что картинка/разрыв становятся
+// отдельным верхнеуровневым блоком, а не тонут внутри абзаца. Второе было
+// реальным багом: пагинация меряет только верхнеуровневые блоки, и если
+// картинка оказывалась внутри абзаца — весь абзац+картинка мерились одним
+// неделимым куском (отсюда «пустое место» на следующей странице), а разрыв
+// страницы внутри абзаца пагинация вообще не видела как разрыв.
+function insertAtCursor(node){
+  const writeArea = $('#write-area');
+  writeArea.focus();
+  const sel = window.getSelection();
+  if(!sel || !sel.rangeCount || !writeArea.contains(sel.anchorNode)){
+    const r = document.createRange();
+    r.selectNodeContents(writeArea);
+    r.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(r);
+  }
+  document.execCommand('insertHTML', false, node.outerHTML);
+}
+
+$('#fmt-image').onclick = ()=> $('#write-img-input').click();
+$('#write-img-input').addEventListener('change', e=>{
+  const file = e.target.files[0];
+  e.target.value = '';
+  if(!file) return;
+  fileToResizedDataURL(file, 1200).then(dataUrl=>{
+    const widget = document.createElement('div');
+    widget.className = 'book-img-inline float-left';
+    widget.contentEditable = 'false';
+    widget.style.width = '35%';
+    const img = document.createElement('img');
+    img.src = dataUrl;
+    img.draggable = false;
+    widget.appendChild(img);
+    insertAtCursor(widget);
+    saveCurrent(); persistDebounced();
+    toast('Добавлено — нажмите на картинку, чтобы подвинуть/изменить размер');
+  }).catch(()=> toast('Не удалось загрузить изображение'));
+});
+
+$('#fmt-pagebreak').onclick = ()=>{
+  const marker = document.createElement('div');
+  marker.className = 'page-break-marker';
+  marker.contentEditable = 'false';
+  marker.textContent = '✂ Разрыв страницы';
+  insertAtCursor(marker);
+  saveCurrent(); persistDebounced();
+  toast('Разрыв страницы добавлен — нажмите на него, чтобы убрать');
+};
+
 // ================== ОБРАБОТКА СВАЙПОВ ==================
 function addSwipe(el, onSwipe, minDist=40){
   let x0=null, y0=null, t0=0;
@@ -651,7 +980,7 @@ function flipWritePage(dir){
   setTimeout(()=>p.style.transform='translateX(-50%) scale(1)',160);
 }
 
-$('#notes-area').addEventListener('input', saveCurrent);
+$('#notes-area').addEventListener('input', ()=>{ saveCurrent(); persistDebounced(); });
 
 // ================== TOAST ==================
 let toastT;
@@ -661,12 +990,18 @@ function toast(msg){
 }
 
 // ================== СТАРТ ==================
-// Демо-книга, чтобы сразу было что полистать
-books.push({
-  id: 1, title: 'Один среди волков', page: 0,
-  notes: 'Главный герой — Мстислав. Русский среди финнов.\nДом Вэняляинэн.\nДевиз: «Один среди волков».',
-  text: `Снег ложился на крыши Оулу третий день подряд, и Мстислав знал — эта зима будет не последним испытанием.\n\nОн стоял у окна длинного дома, глядя, как ветер несёт белые хлопья над замёрзшим заливом. Чужак на чужой земле. Так его называли финны, и он давно перестал спорить.\n\n«Пусть говорят, — думал он. — Волки тоже воют, когда чуют силу».\n\nЗа спиной скрипнула дверь. Вошёл епископ Иван, стряхивая снег с плеч.\n\n— Вести с юга, господин, — произнёс он глухо. — Саво собирает людей.\n\nМстислав не обернулся. Он смотрел на звезду, что зажглась над лесом — первую в эту долгую ночь. Одну. Среди тьмы.\n\n— Пусть собирают, — сказал он наконец. — У волка тоже есть клыки.`
-});
+// Пробуем восстановить книги из localStorage; если их там ещё нет (первый
+// запуск на этом устройстве) — создаём демо-книгу для примера и сразу же
+// сохраняем её, чтобы дальше всегда работать с реальным хранилищем.
+if(!loadBooks()){
+  books.push({
+    id: 1, title: 'Один среди волков', page: 0,
+    notes: 'Главный герой — Мстислав. Русский среди финнов.\nДом Вэняляинэн.\nДевиз: «Один среди волков».',
+    text: `Снег ложился на крыши Оулу третий день подряд, и Мстислав знал — эта зима будет не последним испытанием.\n\nОн стоял у окна длинного дома, глядя, как ветер несёт белые хлопья над замёрзшим заливом. Чужак на чужой земле. Так его называли финны, и он давно перестал спорить.\n\n«Пусть говорят, — думал он. — Волки тоже воют, когда чуют силу».\n\nЗа спиной скрипнула дверь. Вошёл епископ Иван, стряхивая снег с плеч.\n\n— Вести с юга, господин, — произнёс он глухо. — Саво собирает людей.\n\nМстислав не обернулся. Он смотрел на звезду, что зажглась над лесом — первую в эту долгую ночь. Одну. Среди тьмы.\n\n— Пусть собирают, — сказал он наконец. — У волка тоже есть клыки.`
+  });
+  persist();
+}
+$('#app-version').textContent = APP_VERSION;
 renderLibrary();
 </script>
 </body>
