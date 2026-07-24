@@ -1,10 +1,11 @@
-<!-- ВЕРСИЯ: v1.6.1 (2026-07-24) — фикс: экспорт/импорт был вставлен до объявления переменной $, из-за чего скрипт падал на чистой загрузке и библиотека была пустой -->
+<!-- ВЕРСИЯ: v1.7.0 (2026-07-24) — режим читателя: внутри Telegram книга открывается сразу на вкладке «Чтение», вкладки редактирования скрыты -->
 <!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
 <title>Книга</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
   :root {
@@ -82,6 +83,10 @@
   .book-title-top { flex: 1; font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   .tabs { display: flex; background: var(--min-panel); border-bottom: 1px solid var(--min-border); }
+  /* Внутри Telegram (для читателей канала) редактирование скрыто — открытая
+     книга сразу и навсегда показывает только вкладку «Чтение». */
+  body.reader-mode .tabs { display: none; }
+  body.reader-mode #rename-btn { display: none; }
   .tab {
     flex: 1; padding: 11px 4px; text-align: center; font-size: 13px; color: var(--min-muted);
     border: none; background: none; border-bottom: 2px solid transparent; font-weight: 500;
@@ -350,6 +355,17 @@
 </div>
 
 <script>
+// ================== TELEGRAM ==================
+// initData непустой только при реальном запуске внутри Telegram (из ссылки
+// t.me/.../Kniga) — просто наличие window.Telegram.WebApp ни о чём не говорит,
+// SDK создаёт этот объект-заглушку даже в обычном браузере.
+const IN_TELEGRAM = !!(window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData);
+if(IN_TELEGRAM){
+  document.body.classList.add('reader-mode');
+  window.Telegram.WebApp.ready();
+  window.Telegram.WebApp.expand();
+}
+
 // ================== ДАННЫЕ ==================
 // Книги хранятся в localStorage браузера/webview — переживают перезагрузку
 // страницы. Это НЕ синхронизация между устройствами: на другом телефоне или
@@ -357,7 +373,7 @@
 let books = [];
 let currentId = null;
 let modalMode = 'create'; // 'create' | 'rename'
-const APP_VERSION = 'v1.6.1';
+const APP_VERSION = 'v1.7.0';
 
 const STORAGE_KEY = 'kniga_books_v1';
 function persist(){
@@ -547,7 +563,7 @@ function openBook(id){
   $('#notes-area').value = b.notes;
   library.classList.add('hidden');
   editor.classList.add('active');
-  switchTab('write');
+  switchTab(IN_TELEGRAM ? 'read' : 'write');
   updateWriteCounter();
 }
 $('#back-btn').onclick = ()=>{
