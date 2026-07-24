@@ -1,4 +1,4 @@
-<!-- ВЕРСИЯ: v1.5.2 (2026-07-24) — разрыв страницы больше никогда не виден в режиме чтения, даже если застрял внутри абзаца из-за старой вставки -->
+<!-- ВЕРСИЯ: v1.6.0 (2026-07-24) — экспорт/импорт книг в файл, чтобы переносить их между локальным тестом и развёрнутой версией (localStorage не общий между origin) -->
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -268,9 +268,14 @@
   <div id="library">
     <div class="lib-head">
       <h1>Мои книги</h1>
-      <div style="display:flex; flex-direction:column; align-items:flex-end; gap:2px;">
-        <span id="lib-count"></span>
-        <span id="app-version" style="font-size:10px; color: var(--min-muted); opacity:.6;"></span>
+      <div style="display:flex; align-items:center; gap:4px;">
+        <button class="icon-btn" id="export-btn" title="Выгрузить все книги в файл">📤</button>
+        <button class="icon-btn" id="import-btn" title="Загрузить книги из файла">📥</button>
+        <input type="file" id="import-file-input" accept=".json,application/json" style="display:none">
+        <div style="display:flex; flex-direction:column; align-items:flex-end; gap:2px;">
+          <span id="lib-count"></span>
+          <span id="app-version" style="font-size:10px; color: var(--min-muted); opacity:.6;"></span>
+        </div>
       </div>
     </div>
     <div class="lib-list" id="lib-list"></div>
@@ -352,7 +357,7 @@
 let books = [];
 let currentId = null;
 let modalMode = 'create'; // 'create' | 'rename'
-const APP_VERSION = 'v1.5.2';
+const APP_VERSION = 'v1.6.0';
 
 const STORAGE_KEY = 'kniga_books_v1';
 function persist(){
@@ -412,6 +417,58 @@ function fileToResizedDataURL(file, maxDim){
     reader.readAsDataURL(file);
   });
 }
+
+// ================== ЭКСПОРТ / ИМПОРТ ==================
+// localStorage привязан к конкретному origin (домену/протоколу) — локальный
+// файл на компьютере (file://) и развёрнутая версия на GitHub Pages (https://)
+// это два РАЗНЫХ, никогда не связанных хранилища, даже на одном устройстве.
+// Экспорт/импорт — единственный способ перенести книги между ними (или между
+// телефоном и компьютером).
+function exportBooks(){
+  const data = JSON.stringify(books, null, 2);
+  const blob = new Blob([data], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `kniga-backup-${new Date().toISOString().slice(0,10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  toast('Файл с книгами скачан');
+}
+$('#export-btn').onclick = exportBooks;
+
+$('#import-btn').onclick = ()=> $('#import-file-input').click();
+$('#import-file-input').addEventListener('change', e=>{
+  const file = e.target.files[0];
+  e.target.value = '';
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    try{
+      const imported = JSON.parse(reader.result);
+      if(!Array.isArray(imported)) throw new Error('not an array');
+      const existingIds = new Set(books.map(b=>b.id));
+      let added = 0;
+      imported.forEach(b=>{
+        if(!b || typeof b !== 'object') return;
+        const nb = { notes: '', page: 0, text: '', title: 'Без названия', ...b };
+        if(existingIds.has(nb.id)) nb.id = Date.now() + Math.random();
+        existingIds.add(nb.id);
+        books.push(nb);
+        added++;
+      });
+      renderLibrary();
+      persist();
+      toast(`Добавлено книг: ${added}`);
+    }catch(err){
+      console.error('import failed', err);
+      toast('Не удалось прочитать файл — это точно файл, скачанный кнопкой «Экспорт»?');
+    }
+  };
+  reader.readAsText(file);
+});
 
 // Страницы для режима чтения (разбивка по ~1200 симв)
 const CHARS_PER_PAGE = 1200;
